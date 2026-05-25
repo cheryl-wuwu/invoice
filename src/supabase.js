@@ -8,7 +8,65 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 export const EXCEL_BUCKET = 'Excel bucket'
 export const PDF_BUCKET   = 'PDF bucket'
 
-// ── 上傳紀錄 CRUD ─────────────────────────────────────────────────────────────
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
+export async function signInWithGoogle() {
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: window.location.origin,
+      hd: 'autech.com.tw',   // 限定只允許 autech.com.tw 的 Google Workspace 帳號
+    },
+  })
+  if (error) throw error
+}
+
+export async function signOut() {
+  await supabase.auth.signOut()
+}
+
+export async function getSession() {
+  const { data: { session } } = await supabase.auth.getSession()
+  return session
+}
+
+// ── 使用者角色 ─────────────────────────────────────────────────────────────────
+
+export async function getUserRole(email) {
+  const { data, error } = await supabase
+    .from('user_roles')
+    .select('role')
+    .eq('email', email)
+    .single()
+  if (error || !data) return 'staff'   // 預設一般人員
+  return data.role
+}
+
+export async function fetchAllUserRoles() {
+  const { data, error } = await supabase
+    .from('user_roles')
+    .select('*')
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data || []
+}
+
+export async function upsertUserRole(email, role) {
+  const { error } = await supabase
+    .from('user_roles')
+    .upsert({ email, role, updated_at: new Date().toISOString() }, { onConflict: 'email' })
+  if (error) throw error
+}
+
+export async function deleteUserRole(email) {
+  const { error } = await supabase
+    .from('user_roles')
+    .delete()
+    .eq('email', email)
+  if (error) throw error
+}
+
+// ── 上傳紀錄 ──────────────────────────────────────────────────────────────────
 
 export async function fetchRecords() {
   const twoMonthsAgo = new Date()
@@ -39,10 +97,8 @@ export async function updateRecordStatus(id, status) {
 // ── 流水號 ────────────────────────────────────────────────────────────────────
 
 export async function getAndIncrementSeq(dateKey) {
-  // upsert + increment（用 RPC 避免 race condition）
   const { data, error } = await supabase.rpc('increment_export_seq', { p_date_key: dateKey })
   if (error) {
-    // fallback：直接讀寫
     const { data: existing } = await supabase.from('export_seq').select('seq').eq('date_key', dateKey).single()
     const next = (existing?.seq || 0) + 1
     await supabase.from('export_seq').upsert({ date_key: dateKey, seq: next })
@@ -56,16 +112,11 @@ export async function getSeq(dateKey) {
   return data?.seq || 0
 }
 
-// ── 檔案上傳 / 下載 ───────────────────────────────────────────────────────────
+// ── Storage ───────────────────────────────────────────────────────────────────
 
 export async function uploadFile(bucket, path, file) {
   const { error } = await supabase.storage.from(bucket).upload(path, file, { upsert: true })
   if (error) throw error
-}
-
-export async function getFileUrl(bucket, path) {
-  const { data } = supabase.storage.from(bucket).getPublicUrl(path)
-  return data.publicUrl
 }
 
 export async function downloadFileBlob(bucket, path) {
