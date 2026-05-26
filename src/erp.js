@@ -6,7 +6,7 @@ const M = {
   totalAmt:43,  taxType:26,     orderNo:0,  orderDate:2,
 }
 
-const taxLbl = c => ({"1":"應稅","2":"零稅率","3":"免稅","4":"不課稅","5":"特種稅率"}[String(c)]||String(c)||"應稅")
+const taxLbl = c => ({"1":"應稅","2":"零稅率","3":"免稅","4":"應稅(特種)"}[String(c)]||String(c)||"應稅")
 
 export function toADDateCSV(val) {
   if (!val) return ''
@@ -71,7 +71,7 @@ export function parseERP(wb) {
         if (normOrd&&normInv&&normOrd!==normInv)
           errs.push(`日期（${inv.orderDate}）與發票日期（${inv.invoiceDate}）不一致`)
         if (normInv&&normInv!==twToday)
-          errs.push(`發票日期（${inv.invoiceDate}）不是今天（台灣時間 ${twToday.slice(0,4)}/${twToday.slice(4,6)}/${twToday.slice(6,8)}）`)
+          errs.push(`發票日期（${inv.invoiceDate}）不是今天（ ${twToday.slice(0,4)}/${twToday.slice(4,6)}/${twToday.slice(6,8)}）`)
         if (!/^\d{8}$/.test(inv.buyerTaxId)) errs.push(`買方統編「${inv.buyerTaxId}」非 8 位數字`)
         if (!inv.buyerName) errs.push('買方名稱為空')
         if (isNaN(Number(inv.totalAmt))||inv.totalAmt==='') errs.push(`本幣總計「${inv.totalAmt}」非數字`)
@@ -92,8 +92,8 @@ export function toCSV(invoices, tid, tn, tAddr='', tTel='') {
   const lines=[]
   lines.push(row(['H',tid,tn,tAddr,tTel]))
   for (const inv of invoices.filter(v=>v.valid)) {
-    const tc=inv.taxType==='應稅'?'1':inv.taxType==='零稅率'?'2':inv.taxType==='免稅'?'3':inv.taxType==='不課稅'?'4':'1'
-    const tr=tc==='1'?'5':tc==='4'?'特':'0'
+    const tc=inv.taxType==='應稅'?'1':inv.taxType==='零稅率'?'2':inv.taxType==='免稅'?'3':inv.taxType==='應稅(特種)'?'4':'1'
+    const tr=tc==='1'?'5':'0'
     const sa=inv.taxableAmt!==''?Math.round(Number(inv.taxableAmt)):''
     const ta=inv.taxAmt    !==''?Math.round(Number(inv.taxAmt))    :''
     const tt=inv.totalAmt  !==''?Math.round(Number(inv.totalAmt))  :''
