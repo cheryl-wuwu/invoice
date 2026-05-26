@@ -33,7 +33,7 @@ export async function getSession() {
 // ── 使用者角色 ─────────────────────────────────────────────────────────────────
 
 export async function getUserRole(email) {
-  //const { data, error } = await supabase
+  const { data, error } = await supabase
     //.from('user_roles')
     //.select('role')
     //.eq('email', email)
