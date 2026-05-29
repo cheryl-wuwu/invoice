@@ -8,7 +8,7 @@ const C = {
   border:'#E0D5C8',
 }
 
-export default function LoginPage({ error }) {
+export default function LoginPage() {
   return (
     <div style={{minHeight:'100vh',background:C.bg,display:'flex',alignItems:'center',justifyContent:'center',padding:20,fontFamily:"'Outfit',sans-serif"}}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0}`}</style>
