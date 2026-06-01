@@ -1,0 +1,763 @@
+import { useState, useRef, useCallback, useEffect } from 'react'
+import * as XLSX from 'xlsx'
+import {
+  supabase, EXCEL_BUCKET, PDF_BUCKET,
+  fetchRecords, insertRecord, updateRecordStatus,
+  getAndIncrementSeq, getSeq, uploadFile, downloadFileBlob,
+  signOut, getSession, getUserRole
+} from './supabase.js'
+import { parseERP, toCSV, downloadCSV, toADDateCSV } from './erp.js'
+import LoginPage from './Auth.jsx'
+import AdminPanel from './AdminPanel.jsx'
+
+// ── 設計系統 ──────────────────────────────────────────────────────────────────
+// 柔和淺藍 × 淺棕木紋 × 乾淨白底 × 簡約高級
+const C = {
+  // 背景層次
+  bg:        '#F7F5F2',   // 溫暖米白底
+  bgWarm:    '#F0EDE8',   // 淺棕木紋底
+  bgPanel:   '#FFFFFF',   // 純白卡片
+  bgHover:   '#F4F1EC',   // hover 狀態
+  // 木紋棕
+  wood:      '#C4A882',   // 主木紋棕
+  woodLight: '#E8DDD0',   // 淺木紋
+  woodDark:  '#9B7D5A',   // 深木紋
+  // 藍色系
+  blue:      '#5B9BD5',   // 主藍
+  blueLight: '#D6E8F5',   // 淺藍背景
+  blueMid:   '#A8CBE8',   // 中藍
+  blueDark:  '#2F6FA8',   // 深藍
+  // 文字
+  text:      '#3D3530',   // 主文字（暖棕黑）
+  textSub:   '#8C7B6B',   // 次要文字
+  textMuted: '#B8AA9E',   // 淡灰文字
+  // 邊框
+  border:    '#E0D5C8',   // 主邊框
+  borderLight:'#EDE8E1',  // 淡邊框
+  // 狀態色（柔化版）
+  green:     '#6BA58A',
+  greenBg:   '#EAF4EF',
+  red:       '#C97B6E',
+  redBg:     '#FAF0EE',
+  amber:     '#C4974A',
+  amberBg:   '#FAF3E6',
+  purple:    '#8B7EC8',
+  purpleBg:  '#F0EDF8',
+}
+
+// ── 常數 ───────────────────────────────────────────────────────────────────────
+const SELLERS = [
+  { taxId:'27284640', name:'亞郁科技股份有限公司', addr:'台北市文山區樟新街32巷11號',       tel:'02-29367996' },
+  { taxId:'53927205', name:'台灣科亞有限公司',     addr:'桃園市桃園區建國里建國東路7-2號1樓', tel:'03-3670262'  },
+  { taxId:'93497589', name:'兆一科技有限公司',     addr:'台北市中正區館前路34號11樓',         tel:'0920009003'  },
+]
+const ROLES = [
+  { id:'staff',   label:'一般人員',   icon:'👤', tabs:[0,2],    canUploadTab3:false },
+  { id:'finance', label:'財務人員',   icon:'💼', tabs:[0,1,2], canUploadTab3:true  },
+  { id:'admin',   label:'系統管理員', icon:'🛡',  tabs:[0,1,2], canUploadTab3:true  },
+]
+
+// ── 工具 ───────────────────────────────────────────────────────────────────────
+const fmtBytes = b => b<1024?b+' B':b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(2)+' MB'
+const TW = { timeZone:'Asia/Taipei' }
+const fmtTime   = ts => new Date(ts).toLocaleString('zh-TW',{...TW,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})
+const fmtDateTW = ts => new Date(ts).toLocaleDateString('zh-TW',{...TW,year:'numeric',month:'2-digit',day:'2-digit'})
+const todayTW   = ()  => new Date().toLocaleDateString('zh-TW',{...TW,year:'numeric',month:'2-digit',day:'2-digit'})
+const todayKey  = ()  => todayTW().replace(/\//g,'')
+const isToday   = ts  => fmtDateTW(ts) === todayTW()
+const fileIcon  = n => /\.pdf$/i.test(n)?'📄':/\.(xlsx|xls|xlsm)$/i.test(n)?'📊':/\.(jpe?g|png|gif|webp)$/i.test(n)?'🖼':'📎'
+
+// ── 共用 UI ────────────────────────────────────────────────────────────────────
+function Badge({status}){
+  const m={
+    pending: ['待驗證', C.bgHover,    C.textMuted],
+    checking:['驗證中', C.blueLight,  C.blue],
+    error:   ['有錯誤', C.redBg,      C.red],
+    ok:      ['通過',   C.greenBg,    C.green],
+    exported:['已匯出', C.purpleBg,   C.purple],
+    attach:  ['附件',   C.amberBg,    C.amber],
+  }
+  const [label,bg,color]=m[status]||m.pending
+  return <span style={{fontSize:10,fontWeight:600,letterSpacing:'0.04em',padding:'3px 10px',borderRadius:20,background:bg,color,border:`1px solid ${color}33`,whiteSpace:'nowrap',fontFamily:"'Outfit',sans-serif"}}>{label}</span>
+}
+
+function Btn({children,onClick,variant='primary',disabled,style={}}){
+  const variants={
+    primary: {bg:C.blue,      color:'#fff',     border:C.blue},
+    ghost:   {bg:'transparent',color:C.textSub,  border:C.border},
+    danger:  {bg:C.redBg,     color:C.red,       border:C.red+'55'},
+    success: {bg:C.greenBg,   color:C.green,     border:C.green+'55'},
+    purple:  {bg:C.purpleBg,  color:C.purple,    border:C.purple+'55'},
+    wood:    {bg:C.woodLight,  color:C.woodDark,  border:C.wood+'66'},
+  }
+  const v=variants[variant]||variants.primary
+  return <button onClick={onClick} disabled={disabled} style={{
+    background:v.bg, border:`1px solid ${v.border}`, color:v.color,
+    borderRadius:8, padding:'6px 14px', fontSize:12,
+    fontFamily:"'Outfit',sans-serif", fontWeight:600,
+    cursor:disabled?'not-allowed':'pointer', opacity:disabled?0.45:1,
+    transition:'all .15s', boxShadow:'0 1px 3px rgba(0,0,0,.06)',
+    ...style
+  }}
+    onMouseEnter={e=>{ if(!disabled) e.currentTarget.style.filter='brightness(0.94)' }}
+    onMouseLeave={e=>{ e.currentTarget.style.filter='' }}
+  >{children}</button>
+}
+
+function Card({children, style={}}){
+  return <div style={{background:C.bgPanel,border:`1px solid ${C.border}`,borderRadius:14,overflow:'hidden',boxShadow:'0 2px 8px rgba(61,53,48,.06)',...style}}>{children}</div>
+}
+
+function Modal({title,onClose,children,wide,accentColor=C.blue}){
+  return(
+    <div style={{position:'fixed',inset:0,zIndex:999,background:'rgba(61,53,48,.45)',backdropFilter:'blur(8px)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{background:C.bgPanel,border:`1px solid ${C.border}`,borderRadius:18,padding:'28px 32px',width:'100%',maxWidth:wide?740:600,maxHeight:'84vh',display:'flex',flexDirection:'column',boxShadow:'0 20px 60px rgba(61,53,48,.15)'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+          <span style={{fontFamily:"'Playfair Display',serif",fontWeight:700,color:C.text,fontSize:16}}>{title}</span>
+          <button onClick={onClose} style={{background:'none',border:'none',color:C.textMuted,cursor:'pointer',fontSize:20,lineHeight:1,padding:'2px 6px',borderRadius:6,transition:'background .15s'}}
+            onMouseEnter={e=>e.currentTarget.style.background=C.bgHover}
+            onMouseLeave={e=>e.currentTarget.style.background='none'}>✕</button>
+        </div>
+        <div style={{overflowY:'auto',flex:1,paddingRight:4}}>{children}</div>
+        <button onClick={onClose} style={{marginTop:20,padding:'10px',width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.textSub,borderRadius:10,cursor:'pointer',fontFamily:"'Outfit',sans-serif",fontWeight:600,fontSize:13,transition:'background .15s'}}
+          onMouseEnter={e=>e.currentTarget.style.background=C.bgHover}
+          onMouseLeave={e=>e.currentTarget.style.background=C.bg}>關閉</button>
+      </div>
+    </div>
+  )
+}
+
+function NoAccess({role}){
+  return(
+    <div style={{textAlign:'center',padding:'80px 20px'}}>
+      <div style={{fontSize:52,marginBottom:16,opacity:0.4}}>🔒</div>
+      <p style={{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:18,marginBottom:8,color:C.text}}>此功能需要特定權限</p>
+      <p style={{color:C.textSub,fontSize:13,fontFamily:"'Outfit',sans-serif"}}>目前身份：{role.icon} {role.label}</p>
+      <p style={{color:C.textMuted,fontSize:12,marginTop:6}}>請切換至 財務人員 / 系統管理員</p>
+    </div>
+  )
+}
+
+function Spinner(){
+  return <span style={{display:'inline-block',animation:'spin 1s linear infinite',color:C.blue}}>⟳</span>
+}
+
+function Divider(){return <div style={{height:1,background:C.borderLight,margin:'0 -18px'}}/>}
+
+// ── 角色徽章 ──────────────────────────────────────────────────────────────────
+function RoleBadge({role}){
+  const m={staff:[C.bgHover,C.textSub],finance:[C.greenBg,C.green],admin:[C.blueLight,C.blueDark]}
+  const [bg,color]=m[role.id]||m.staff
+  return(
+    <div style={{background:bg,border:`1px solid ${color}33`,borderRadius:10,padding:'7px 12px',display:'flex',alignItems:'center',gap:7}}>
+      <span style={{fontSize:15}}>{role.icon}</span>
+      <div>
+        <div style={{fontSize:9,color,fontFamily:"'Outfit',sans-serif",fontWeight:600,letterSpacing:'0.08em',textTransform:'uppercase',lineHeight:1}}>身份</div>
+        <div style={{fontSize:12,fontWeight:700,color:C.text,lineHeight:1.4,fontFamily:"'Outfit',sans-serif"}}>{role.label}</div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tab 1：上傳 & 紀錄
+// ═══════════════════════════════════════════════════════════════════════════════
+function Tab1({onAddFiles,records,loadingRecords}){
+  const [drag,setDrag]=useState(false)
+  const [filter,setFilter]=useState('all')
+  const [uploading,setUploading]=useState(false)
+  const ref=useRef()
+  const filtered=records.filter(r=>{
+    const ts=new Date(r.uploaded_at).getTime()
+    if(filter==='today')   return isToday(ts)
+    if(filter==='invoice') return r.tab_type==='tab1'
+    if(filter==='attach')  return r.tab_type==='tab3'
+    return true
+  }).sort((a,b)=>new Date(b.uploaded_at)-new Date(a.uploaded_at))
+  const todayN=records.filter(r=>isToday(new Date(r.uploaded_at).getTime())).length
+  const invoiceN=records.filter(r=>r.tab_type==='tab1').length
+  const attachN=records.filter(r=>r.tab_type==='tab3').length
+  const handleFiles=async files=>{setUploading(true);await onAddFiles(files);setUploading(false)}
+
+  return(
+    <div style={{animation:'fadeUp .3s ease'}}>
+      {/* 上傳區 */}
+      <div
+        onDragOver={e=>{e.preventDefault();setDrag(true)}} onDragLeave={()=>setDrag(false)}
+        onDrop={e=>{e.preventDefault();setDrag(false);handleFiles([...e.dataTransfer.files])}}
+        onClick={()=>ref.current.click()}
+        style={{
+          border:`2px dashed ${drag?C.blue:C.wood}`,
+          borderRadius:16, padding:'48px 24px', textAlign:'center', cursor:'pointer',
+          background:drag?C.blueLight:C.bgWarm,
+          transition:'all .2s', marginBottom:28, opacity:uploading?0.7:1,
+          backgroundImage:drag?'none':`repeating-linear-gradient(45deg,${C.woodLight}22 0,${C.woodLight}22 1px,transparent 0,transparent 50%)`,
+          backgroundSize:'12px 12px',
+        }}>
+        {uploading
+          ? <div style={{fontSize:36,marginBottom:10,color:C.blue}}><Spinner/></div>
+          : <div style={{fontSize:44,marginBottom:12}}>📂</div>}
+        <p style={{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:18,marginBottom:6,color:C.text}}>
+          {uploading?'上傳中，請稍候…':'拖曳 ERP 發票 Excel 至此'}
+        </p>
+        <p style={{color:C.textSub,fontSize:12,fontFamily:"'Outfit',sans-serif"}}>
+          或點擊選取　·　支援 .xlsx / .xls / .xlsm　·　☁ 自動同步雲端
+        </p>
+        <input ref={ref} type="file" multiple accept=".xlsx,.xls,.xlsm" style={{display:'none'}}
+          onChange={e=>{handleFiles([...e.target.files]);e.target.value=''}}/>
+      </div>
+
+      {/* 篩選列 */}
+      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16,flexWrap:'wrap'}}>
+        <span style={{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:16,color:C.text}}>上傳紀錄</span>
+        <span style={{fontSize:10,fontFamily:"'Outfit',sans-serif",color:C.green,background:C.greenBg,border:`1px solid ${C.green}33`,borderRadius:20,padding:'2px 9px',fontWeight:600}}>☁ 雲端・多人共用</span>
+        <div style={{flex:1}}/>
+        {[['all','全部',records.length,C.textSub],['today','今日',todayN,C.blue],['invoice','發票',invoiceN,C.purple],['attach','附件',attachN,C.amber]].map(([v,l,n,c])=>(
+          <button key={v} onClick={()=>setFilter(v)} style={{
+            padding:'5px 13px',borderRadius:20,cursor:'pointer',
+            fontFamily:"'Outfit',sans-serif",fontSize:11,fontWeight:600,transition:'all .15s',
+            border:`1px solid ${filter===v?c:C.border}`,
+            background:filter===v?c+'18':C.bgPanel,
+            color:filter===v?c:C.textSub,
+          }}>{l} {n}</button>
+        ))}
+      </div>
+
+      {/* 列表 */}
+      {loadingRecords?(
+        <div style={{textAlign:'center',padding:'48px',color:C.textMuted,fontFamily:"'Outfit',sans-serif",fontSize:13}}><Spinner/> 載入中…</div>
+      ):filtered.length===0?(
+        <Card style={{textAlign:'center',padding:'52px 20px'}}>
+          <div style={{fontSize:40,marginBottom:10,opacity:.3}}>📋</div>
+          <p style={{fontFamily:"'Outfit',sans-serif",fontSize:13,color:C.textMuted}}>無符合條件的紀錄</p>
+        </Card>
+      ):(
+        <Card>
+          <div style={{display:'grid',gridTemplateColumns:'28px 1fr 80px 80px 140px 80px',padding:'10px 18px',background:C.bgWarm,fontSize:10,fontFamily:"'Outfit',sans-serif",color:C.textMuted,letterSpacing:'0.07em',fontWeight:600,textTransform:'uppercase',gap:8}}>
+            {['','檔案名稱','大小','類型','上傳時間','狀態'].map((h,i)=><span key={i}>{h}</span>)}
+          </div>
+          <Divider/>
+          {filtered.map((r,idx)=>{
+            const ts=new Date(r.uploaded_at).getTime()
+            return(
+              <div key={r.id} style={{display:'grid',gridTemplateColumns:'28px 1fr 80px 80px 140px 80px',padding:'13px 18px',alignItems:'center',gap:8,borderBottom:idx<filtered.length-1?`1px solid ${C.borderLight}`:'none',transition:'background .12s'}}
+                onMouseEnter={e=>e.currentTarget.style.background=C.bgHover}
+                onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                <span style={{fontSize:17,textAlign:'center'}}>{r.tab_type==='tab3'?fileIcon(r.name):'🧾'}</span>
+                <div style={{minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:C.text}} title={r.name}>{r.name}</div>
+                  {r.uploader&&<div style={{fontSize:10,color:C.textMuted,fontFamily:"'Outfit',sans-serif",marginTop:1}}>{r.uploader}</div>}
+                </div>
+                <span style={{fontSize:11,color:C.textSub,fontFamily:"'Outfit',monospace"}}>{fmtBytes(r.size)}</span>
+                <span style={{fontSize:11,color:C.textSub,fontFamily:"'Outfit',sans-serif"}}>{r.tab_type==='tab3'?'附件':'發票'}</span>
+                <span style={{fontSize:11,color:C.textSub,fontFamily:"'Outfit',monospace"}}>{fmtTime(ts)}</span>
+                <Badge status={r.tab_type==='tab3'?'attach':r.status}/>
+              </div>
+            )
+          })}
+        </Card>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tab 2：驗證 & 匯出
+// ═══════════════════════════════════════════════════════════════════════════════
+function Tab2({records,onStatusUpdate,role,exportSeq,setExportSeq}){
+  const [si,setSi]           = useState(0)
+  const [modal,setModal]     = useState(null)
+  const [localFiles,setLocal]= useState({})
+  const [dlLoading,setDlLoad]= useState(null)
+
+  const invRecords = records.filter(r=>r.tab_type==='tab1')
+  const getEntry   = rec => localFiles[rec.id]
+  const getStatus  = rec => localFiles[rec.id]?.status || rec.status
+
+  const loadFile = useCallback(async rec => {
+    if(localFiles[rec.id]?.wb) return localFiles[rec.id]
+    setDlLoad(rec.id)
+    try{
+      const blob=await downloadFileBlob(EXCEL_BUCKET,rec.storage_path)
+      const buf=await blob.arrayBuffer()
+      const wb=XLSX.read(buf,{type:'array'})
+      const {invoices,errors}=parseERP(wb)
+      const hasErr=errors.length>0||invoices.some(i=>!i.valid)
+      const status=hasErr?'error':'ok'
+      const entry={wb,invoices,errors,status}
+      setLocal(p=>({...p,[rec.id]:entry}))
+      await updateRecordStatus(rec.id,status)
+      onStatusUpdate(rec.id,status)
+      setDlLoad(null)
+      return entry
+    }catch(e){
+      setDlLoad(null)
+      const entry={wb:null,invoices:[],errors:[{row:'-',msgs:['下載或解析失敗：'+e.message]}],status:'error'}
+      setLocal(p=>({...p,[rec.id]:entry}))
+      return entry
+    }
+  },[localFiles,onStatusUpdate])
+
+  const checkFile=useCallback(async rec=>{
+    onStatusUpdate(rec.id,'checking')
+    await loadFile(rec)
+  },[loadFile,onStatusUpdate])
+
+  const doExportSingle=useCallback(async rec=>{
+    let entry=localFiles[rec.id]
+    if(!entry?.wb) entry=await loadFile(rec)
+    if(!entry?.invoices?.length) return
+    const {taxId:tid,name:tn,addr:tAddr,tel:tTel}=SELLERS[si]
+    const tk=todayKey()
+    const next=await getAndIncrementSeq(tk)
+    setExportSeq(next)
+    downloadCSV(toCSV(entry.invoices,tid,tn,tAddr,tTel),`發票彙總${tk}-${next}.csv`)
+    await updateRecordStatus(rec.id,'exported')
+    onStatusUpdate(rec.id,'exported')
+  },[localFiles,si,setExportSeq,onStatusUpdate,loadFile])
+
+  const doExportAll=useCallback(async()=>{
+    const passed=invRecords.filter(r=>getStatus(r)==='ok'||getStatus(r)==='exported')
+    const allEntries=await Promise.all(passed.map(r=>loadFile(r)))
+    const allInvoices=allEntries.flatMap(e=>e?.invoices||[])
+    const {taxId:tid,name:tn,addr:tAddr,tel:tTel}=SELLERS[si]
+    const tk=todayKey()
+    const next=await getAndIncrementSeq(tk)
+    setExportSeq(next)
+    downloadCSV(toCSV(allInvoices,tid,tn,tAddr,tTel),`發票彙總${tk}-${next}.csv`)
+    for(const r of passed){await updateRecordStatus(r.id,'exported');onStatusUpdate(r.id,'exported')}
+  },[invRecords,si,setExportSeq,onStatusUpdate,loadFile])
+
+  const pN =invRecords.filter(r=>getStatus(r)==='pending').length
+  const okN=invRecords.filter(r=>getStatus(r)==='ok'||getStatus(r)==='exported').length
+  const eN =invRecords.filter(r=>getStatus(r)==='error').length
+  const modalRec=modal?invRecords.find(r=>r.id===modal.fileId):null
+  const modalEntry=modalRec?getEntry(modalRec):null
+
+  if(!role.tabs.includes(1)) return <NoAccess role={role}/>
+
+  return(
+    <div style={{animation:'fadeUp .3s ease'}}>
+      {/* 賣方選擇 */}
+      <Card style={{padding:'18px 20px',marginBottom:20}}>
+        <div style={{fontSize:10,fontFamily:"'Outfit',sans-serif",color:C.textMuted,fontWeight:600,letterSpacing:'0.08em',textTransform:'uppercase',marginBottom:12}}>選擇賣方公司</div>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:12}}>
+          {SELLERS.map((s,i)=>(
+            <button key={i} onClick={()=>setSi(i)} style={{
+              padding:'10px 16px', borderRadius:10, cursor:'pointer',
+              fontFamily:"'Outfit',sans-serif", fontWeight:600, fontSize:12, transition:'all .15s',
+              background:si===i?C.blueLight:C.bg,
+              border:`1px solid ${si===i?C.blue:C.border}`,
+              color:si===i?C.blueDark:C.textSub,
+              boxShadow:si===i?`0 0 0 3px ${C.blue}18`:'none',
+            }}>
+              <div style={{fontSize:10,color:si===i?C.blue:C.textMuted,fontFamily:"'Outfit',monospace",marginBottom:2}}>{s.taxId}</div>
+              {s.name}
+              {i===0&&<span style={{marginLeft:6,fontSize:9,color:C.wood,fontWeight:700}}>預設</span>}
+            </button>
+          ))}
+        </div>
+        <div style={{display:'flex',gap:16,padding:'10px 14px',background:C.bgWarm,borderRadius:8,flexWrap:'wrap'}}>
+          <span style={{fontSize:11,color:C.textSub,fontFamily:"'Outfit',sans-serif"}}>📍 {SELLERS[si].addr}</span>
+          <span style={{fontSize:11,color:C.textSub,fontFamily:"'Outfit',sans-serif"}}>📞 {SELLERS[si].tel}</span>
+        </div>
+      </Card>
+
+      {/* 流水號 */}
+      <div style={{marginBottom:16,fontSize:12,fontFamily:"'Outfit',sans-serif",color:C.textSub}}>
+        今日匯出流水號：<span style={{color:C.blue,fontWeight:700}}>#{exportSeq}</span>　·　下次匯出 <span style={{color:C.textMuted}}>#{exportSeq+1}</span>
+      </div>
+
+      {/* 統計 + 批次操作 */}
+      {invRecords.length>0&&(
+        <div style={{display:'flex',gap:10,marginBottom:18,flexWrap:'wrap',alignItems:'center'}}>
+          {[['待驗證',pN,C.textSub,C.bg],['有錯誤',eN,C.red,C.redBg],['通過',okN,C.green,C.greenBg]].map(([l,v,c,bg])=>(
+            <div key={l} style={{background:bg,border:`1px solid ${c}33`,borderRadius:12,padding:'8px 16px',display:'flex',gap:6,alignItems:'baseline'}}>
+              <span style={{fontSize:22,fontWeight:800,color:c,fontFamily:"'Playfair Display',serif"}}>{v}</span>
+              <span style={{fontSize:11,color:c,fontFamily:"'Outfit',sans-serif",fontWeight:600}}>{l}</span>
+            </div>
+          ))}
+          <div style={{flex:1}}/>
+          {pN>0&&<Btn onClick={()=>invRecords.filter(r=>getStatus(r)==='pending').forEach(r=>checkFile(r))} style={{padding:'9px 18px',fontSize:12}}>▶ 全部驗證 ({pN})</Btn>}
+          {okN>0&&<Btn onClick={doExportAll} variant="wood" style={{padding:'9px 18px',fontSize:12}}>⬇ 全部匯出 CSV ({okN})</Btn>}
+        </div>
+      )}
+
+      {/* 發票列表 */}
+      {invRecords.length===0?(
+        <Card style={{textAlign:'center',padding:'60px 20px'}}>
+          <div style={{fontSize:40,marginBottom:10,opacity:.3}}>🔍</div>
+          <p style={{fontFamily:"'Outfit',sans-serif",fontSize:13,color:C.textMuted}}>請先至「上傳」頁籤上傳 ERP 發票檔案</p>
+        </Card>
+      ):(
+        <Card>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 76px 76px 52px 120px 1fr',padding:'10px 18px',background:C.bgWarm,fontSize:10,fontFamily:"'Outfit',sans-serif",color:C.textMuted,letterSpacing:'0.07em',fontWeight:600,textTransform:'uppercase',gap:8}}>
+            {['檔案名稱','大小','筆數','錯誤','上傳時間','操作'].map((h,i)=><span key={i} style={{textAlign:i===5?'center':'left'}}>{h}</span>)}
+          </div>
+          <Divider/>
+          {invRecords.map((rec,idx)=>{
+            const entry=getEntry(rec)
+            const status=getStatus(rec)
+            const vN=entry?.invoices?.filter(i=>i.valid).length??0
+            const iN=entry?.invoices?.length??0
+            const rE=(entry?.errors?.length??0)+(entry?.invoices?.filter(i=>!i.valid).length??0)
+            const isLoad=dlLoading===rec.id
+            return(
+              <div key={rec.id} style={{display:'grid',gridTemplateColumns:'1fr 76px 76px 52px 120px 1fr',padding:'14px 18px',alignItems:'center',gap:8,borderBottom:idx<invRecords.length-1?`1px solid ${C.borderLight}`:'none',transition:'background .12s'}}
+                onMouseEnter={e=>e.currentTarget.style.background=C.bgHover}
+                onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                <div style={{display:'flex',flexDirection:'column',gap:5,minWidth:0}}>
+                  <span style={{fontSize:13,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:C.text}} title={rec.name}>{rec.name}</span>
+                  <Badge status={status}/>
+                </div>
+                <span style={{fontSize:11,color:C.textSub,fontFamily:"'Outfit',monospace"}}>{fmtBytes(rec.size)}</span>
+                <span style={{fontSize:11,color:iN>0?C.text:C.textMuted,fontFamily:"'Outfit',monospace"}}>{iN>0?`${vN}/${iN}`:'—'}</span>
+                <span style={{fontSize:11,color:rE>0?C.red:C.green,fontFamily:"'Outfit',monospace"}}>{status==='pending'?'—':rE>0?rE:'✓'}</span>
+                <span style={{fontSize:11,color:C.textSub,fontFamily:"'Outfit',monospace"}}>{fmtTime(new Date(rec.uploaded_at).getTime())}</span>
+                <div style={{display:'flex',gap:5,justifyContent:'center',flexWrap:'wrap'}}>
+                  {isLoad&&<span style={{fontSize:11,color:C.blue,fontFamily:"'Outfit',sans-serif"}}><Spinner/> 載入</span>}
+                  {!isLoad&&(status==='pending'||status==='checking')&&<Btn onClick={()=>checkFile(rec)}>▶ 驗證</Btn>}
+                  {!isLoad&&status==='error'&&<Btn onClick={()=>checkFile(rec)} variant="ghost">↺ 重試</Btn>}
+                  {!isLoad&&entry?.invoices?.length>0&&<Btn onClick={()=>setModal({type:'preview',fileId:rec.id})} variant="ghost">👁 明細</Btn>}
+                  {!isLoad&&status==='error'&&rE>0&&<Btn onClick={()=>setModal({type:'errors',fileId:rec.id})} variant="danger">⚠ {rE}</Btn>}
+                  {!isLoad&&(status==='ok'||status==='exported')&&<Btn onClick={()=>doExportSingle(rec)} variant="wood">⬇ CSV</Btn>}
+                </div>
+              </div>
+            )
+          })}
+        </Card>
+      )}
+
+      {/* 錯誤 Modal */}
+      {modal?.type==='errors'&&modalEntry&&(
+        <Modal title={`驗證錯誤 — ${modalRec?.name}`} onClose={()=>setModal(null)}>
+          <p style={{color:C.textSub,fontSize:12,marginBottom:14,fontFamily:"'Outfit',sans-serif"}}>請修正後重新上傳：</p>
+          <div style={{display:'flex',flexDirection:'column',gap:8}}>
+            {[...(modalEntry.errors||[]).map((e,i)=>({key:`g${i}`,row:e.row,inv:'',msgs:e.msgs})),
+              ...(modalEntry.invoices||[]).filter(i=>!i.valid).map((v,i)=>({key:`r${i}`,row:v.sourceRow,inv:v.invoiceNo,msgs:v.errs}))
+            ].map(it=>(
+              <div key={it.key} style={{background:C.redBg,border:`1px solid ${C.red}33`,borderRadius:10,padding:'10px 14px'}}>
+                <div style={{fontSize:11,color:C.textSub,fontFamily:"'Outfit',sans-serif",marginBottom:4,fontWeight:600}}>第 {it.row} 列{it.inv?` · ${it.inv}`:''}</div>
+                {it.msgs.map((m,j)=><div key={j} style={{fontSize:12,color:C.red,fontFamily:"'Outfit',sans-serif"}}>· {m}</div>)}
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
+
+      {/* 明細 Modal */}
+      {modal?.type==='preview'&&modalEntry&&(
+        <Modal title={`發票明細 — ${modalRec?.name}`} onClose={()=>setModal(null)} wide>
+          <p style={{color:C.textSub,fontSize:11,fontFamily:"'Outfit',sans-serif",marginBottom:14}}>
+            共 {modalEntry.invoices.length} 筆　·　<span style={{color:C.green,fontWeight:600}}>{modalEntry.invoices.filter(i=>i.valid).length} 可匯出</span>
+          </p>
+          <div style={{overflowX:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+              <thead><tr style={{background:C.bgWarm}}>
+                {['發票號碼','日期','買方名稱','統編','含稅金額','狀態'].map(h=>(
+                  <th key={h} style={{padding:'8px 12px',color:C.textMuted,fontFamily:"'Outfit',sans-serif",textAlign:'left',borderBottom:`1px solid ${C.border}`,whiteSpace:'nowrap',fontSize:10,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.06em'}}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {modalEntry.invoices.map((v,i)=>(
+                  <tr key={i} style={{borderBottom:`1px solid ${C.borderLight}`,background:i%2?C.bg:C.bgPanel}}>
+                    <td style={{padding:'8px 12px',color:C.text,fontFamily:"'Outfit',monospace",fontSize:12}}>{v.invoiceNo||'—'}</td>
+                    <td style={{padding:'8px 12px',color:C.textSub,fontFamily:"'Outfit',monospace",fontSize:12}}>{toADDateCSV(v.invoiceDate)}</td>
+                    <td style={{padding:'8px 12px',color:C.textSub,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontSize:12}}>{v.buyerName||'—'}</td>
+                    <td style={{padding:'8px 12px',color:C.textSub,fontFamily:"'Outfit',monospace",fontSize:12}}>{v.buyerTaxId||'—'}</td>
+                    <td style={{padding:'8px 12px',color:C.green,fontFamily:"'Outfit',monospace",textAlign:'right',fontWeight:600,fontSize:12}}>{v.totalAmt!==''?Number(v.totalAmt).toLocaleString():'—'}</td>
+                    <td style={{padding:'8px 12px'}}><Badge status={v.valid?'ok':'error'}/></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tab 3：附件管理
+// ═══════════════════════════════════════════════════════════════════════════════
+function Tab3({records,onAddFiles,role}){
+  const [drag,setDrag]       = useState(false)
+  const [uploading,setUpl]   = useState(false)
+  const [dlLoading,setDlLoad]= useState(null)
+  const ref=useRef()
+  const canUp=role.canUploadTab3
+  const t3=records.filter(r=>r.tab_type==='tab3').sort((a,b)=>new Date(b.uploaded_at)-new Date(a.uploaded_at))
+  const handleFiles=async files=>{setUpl(true);await onAddFiles(files);setUpl(false)}
+  const dlFile=async rec=>{
+    setDlLoad(rec.id)
+    try{
+      const blob=await downloadFileBlob(PDF_BUCKET,rec.storage_path)
+      const url=URL.createObjectURL(blob)
+      Object.assign(document.createElement('a'),{href:url,download:rec.name}).click()
+      URL.revokeObjectURL(url)
+    }catch(e){alert('下載失敗：'+e.message)}
+    setDlLoad(null)
+  }
+  return(
+    <div style={{animation:'fadeUp .3s ease'}}>
+      {/* 上傳區 */}
+      <div style={{marginBottom:32}}>
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
+          <span style={{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:16,color:C.text}}>附件上傳</span>
+          <span style={{fontSize:10,fontFamily:"'Outfit',sans-serif",
+            color:canUp?C.amber:C.red,background:canUp?C.amberBg:C.redBg,
+            border:`1px solid ${canUp?C.amber+'44':C.red+'44'}`,borderRadius:20,padding:'2px 9px',fontWeight:600}}>
+            {canUp?'✓ 有上傳權限':'🔒 無上傳權限'}
+          </span>
+        </div>
+        {canUp?(
+          <div
+            onDragOver={e=>{e.preventDefault();setDrag(true)}} onDragLeave={()=>setDrag(false)}
+            onDrop={e=>{e.preventDefault();setDrag(false);handleFiles([...e.dataTransfer.files])}}
+            onClick={()=>ref.current.click()}
+            style={{border:`2px dashed ${drag?C.amber:C.wood}`,borderRadius:16,padding:'40px 24px',textAlign:'center',cursor:'pointer',background:drag?C.amberBg:C.bgWarm,transition:'all .2s',opacity:uploading?0.7:1,backgroundImage:`repeating-linear-gradient(45deg,${C.woodLight}22 0,${C.woodLight}22 1px,transparent 0,transparent 50%)`,backgroundSize:'12px 12px'}}>
+            {uploading?<div style={{fontSize:32,marginBottom:10}}><Spinner/></div>:<div style={{fontSize:40,marginBottom:10}}>📎</div>}
+            <p style={{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:16,marginBottom:5,color:C.text}}>{uploading?'上傳中…':'拖曳附件至此，或點擊選取'}</p>
+            <p style={{color:C.textSub,fontSize:12,fontFamily:"'Outfit',sans-serif"}}>支援 PDF、圖片及其他格式　·　☁ 儲存至雲端</p>
+            <input ref={ref} type="file" multiple style={{display:'none'}} onChange={e=>{handleFiles([...e.target.files]);e.target.value=''}}/>
+          </div>
+        ):(
+          <Card style={{padding:'40px 24px',textAlign:'center',background:C.bgWarm}}>
+            <div style={{fontSize:36,marginBottom:10,opacity:.2}}>🔒</div>
+            <p style={{color:C.textMuted,fontSize:13,fontFamily:"'Outfit',sans-serif"}}>目前身份（{role.icon} {role.label}）無法上傳附件</p>
+          </Card>
+        )}
+      </div>
+
+      {/* 下載區 */}
+      <div>
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16,flexWrap:'wrap'}}>
+          <span style={{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:16,color:C.text}}>附件下載</span>
+          <span style={{fontSize:10,fontFamily:"'Outfit',sans-serif",color:C.green,background:C.greenBg,border:`1px solid ${C.green}33`,borderRadius:20,padding:'2px 9px',fontWeight:600}}>✓ 無需權限</span>
+          <span style={{fontSize:10,fontFamily:"'Outfit',sans-serif",color:C.amber,background:C.amberBg,border:`1px solid ${C.amber}33`,borderRadius:20,padding:'2px 9px',fontWeight:600}}>{t3.length} 個附件</span>
+        </div>
+        {t3.length===0?(
+          <Card style={{textAlign:'center',padding:'52px 20px',background:C.bgWarm}}>
+            <div style={{fontSize:40,marginBottom:10,opacity:.3}}>📂</div>
+            <p style={{fontFamily:"'Outfit',sans-serif",fontSize:13,color:C.textMuted}}>尚無可下載的附件</p>
+          </Card>
+        ):(
+          <Card>
+            <div style={{display:'grid',gridTemplateColumns:'28px 1fr 80px 140px 90px',padding:'10px 18px',background:C.bgWarm,fontSize:10,fontFamily:"'Outfit',sans-serif",color:C.textMuted,letterSpacing:'0.07em',fontWeight:600,textTransform:'uppercase',gap:8}}>
+              {['','檔案名稱','大小','上傳時間','操作'].map((h,i)=><span key={i} style={{textAlign:i===4?'center':'left'}}>{h}</span>)}
+            </div>
+            <Divider/>
+            {t3.map((rec,idx)=>(
+              <div key={rec.id} style={{display:'grid',gridTemplateColumns:'28px 1fr 80px 140px 90px',padding:'13px 18px',alignItems:'center',gap:8,borderBottom:idx<t3.length-1?`1px solid ${C.borderLight}`:'none',transition:'background .12s'}}
+                onMouseEnter={e=>e.currentTarget.style.background=C.bgHover}
+                onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                <span style={{fontSize:17,textAlign:'center'}}>{fileIcon(rec.name)}</span>
+                <span style={{fontSize:13,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:C.text}} title={rec.name}>{rec.name}</span>
+                <span style={{fontSize:11,color:C.textSub,fontFamily:"'Outfit',monospace"}}>{fmtBytes(rec.size)}</span>
+                <span style={{fontSize:11,color:C.textSub,fontFamily:"'Outfit',monospace"}}>{fmtTime(new Date(rec.uploaded_at).getTime())}</span>
+                <div style={{display:'flex',justifyContent:'center'}}>
+                  {dlLoading===rec.id?<Spinner/>:<Btn onClick={()=>dlFile(rec)} variant="success">⬇ 下載</Btn>}
+                </div>
+              </div>
+            ))}
+          </Card>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 根元件
+// ═══════════════════════════════════════════════════════════════════════════════
+export default function App(){
+  const [session,setSession]        = useState(undefined)
+  const [role,setRole]              = useState(()=>ROLES.find(x=>x.id===localStorage.getItem('einvoice-role'))||ROLES[0])
+  const [tab,setTab]                = useState(0)
+  const [records,setRecords]        = useState([])
+  const [loadingRecords,setLoading] = useState(true)
+  const [exportSeq,setExportSeq]    = useState(0)
+  const [showAdmin,setShowAdmin]    = useState(false)
+
+  useEffect(()=>{
+    const ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRzdGNza3l2eWp3YnlidnZ4YXhkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzMzc4NzgsImV4cCI6MjA5NDkxMzg3OH0.kgdDE9iZ6sp6NWD8Rn21n6METZkUXCWt7E03GM-pZ-4'
+    const loadRole=async(email,token)=>{
+      try{
+        const res=await fetch(`https://tstcskyvyjwbybvvxaxd.supabase.co/rest/v1/user_roles?select=role&email=eq.${encodeURIComponent(email)}&limit=1`,
+          {headers:{'apikey':ANON_KEY,'Authorization':`Bearer ${token}`}})
+        const data=await res.json()
+        return data?.[0]?.role||'staff'
+      }catch{return'staff'}
+    }
+    const{data:{subscription}}=supabase.auth.onAuthStateChange(async(event,sess)=>{
+      if(event==='SIGNED_OUT'){localStorage.removeItem('einvoice-role');setSession(null);setRole(ROLES[0]);return}
+      if(sess?.user&&sess.access_token){
+        setSession(sess)
+        const email=sess.user.user_metadata?.email||sess.user.email||''
+        const r=await loadRole(email,sess.access_token)
+        const found=ROLES.find(x=>x.id===r)||ROLES[0]
+        localStorage.setItem('einvoice-role',found.id)
+        setRole(found)
+      }else{setSession(null)}
+    })
+    return()=>subscription.unsubscribe()
+  },[])
+
+  useEffect(()=>{
+    if(!session)return
+    ;(async()=>{
+      setLoading(true)
+      try{const[recs,seq]=await Promise.all([fetchRecords(),getSeq(todayKey())]);setRecords(recs);setExportSeq(seq)}
+      catch(e){console.error(e)}
+      setLoading(false)
+    })()
+  },[session])
+
+  useEffect(()=>{
+    if(!session)return
+    const t=setInterval(async()=>{try{setRecords(await fetchRecords())}catch{}},30000)
+    return()=>clearInterval(t)
+  },[session])
+
+  const addTab1=useCallback(async files=>{
+    for(const f of files){
+      if(!f.name.match(/\.(xlsx|xls|xlsm)$/i))continue
+      const id=`t1-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const path=`${todayKey()}/${id}_${f.name}`
+      try{
+        await uploadFile(EXCEL_BUCKET,path,f)
+        const rec={id,name:f.name,size:f.size,uploaded_at:new Date().toISOString(),tab_type:'tab1',status:'pending',storage_path:path,uploader:role.label}
+        await insertRecord(rec);setRecords(p=>[rec,...p])
+      }catch(e){alert('上傳失敗：'+e.message)}
+    }
+  },[role])
+
+  const addTab3=useCallback(async files=>{
+    for(const f of files){
+      const id=`t3-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const path=`${todayKey()}/${id}_${f.name}`
+      try{
+        await uploadFile(PDF_BUCKET,path,f)
+        const rec={id,name:f.name,size:f.size,uploaded_at:new Date().toISOString(),tab_type:'tab3',status:'attach',storage_path:path,uploader:role.label}
+        await insertRecord(rec);setRecords(p=>[rec,...p])
+      }catch(e){alert('上傳失敗：'+e.message)}
+    }
+  },[role])
+
+  const handleStatusUpdate=useCallback((id,status)=>{
+    setRecords(p=>p.map(r=>r.id===id?{...r,status}:r))
+  },[])
+
+  useEffect(()=>{
+    const t=setTimeout(()=>setSession(s=>s===undefined?null:s),5000)
+    return()=>clearTimeout(t)
+  },[])
+
+  if(session===undefined) return(
+    <div style={{minHeight:'100vh',background:C.bg,display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <span style={{color:C.textMuted,fontFamily:"'Outfit',sans-serif",fontSize:13}}><Spinner/> 載入中…</span>
+    </div>
+  )
+  if(!session) return <LoginPage/>
+
+  const TABS=[
+    {label:'上傳',      icon:'📤'},
+    {label:'驗證 & 匯出',icon:'✅',locked:!role.tabs.includes(1)},
+    {label:'附件管理',  icon:'📎'},
+  ]
+  const todayN=records.filter(r=>isToday(new Date(r.uploaded_at).getTime())).length
+
+  return(
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap');
+        *{box-sizing:border-box;margin:0;padding:0}
+        body{background:${C.bg};color:${C.text};font-family:'Outfit',sans-serif}
+        ::-webkit-scrollbar{width:6px;height:6px}
+        ::-webkit-scrollbar-track{background:${C.bgWarm}}
+        ::-webkit-scrollbar-thumb{background:${C.wood};border-radius:3px}
+        ::-webkit-scrollbar-thumb:hover{background:${C.woodDark}}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+        @keyframes spin{to{transform:rotate(360deg)}}
+      `}</style>
+
+      {/* 頂部木紋裝飾條 */}
+      <div style={{height:4,background:`linear-gradient(90deg,${C.woodLight},${C.wood},${C.blue},${C.wood},${C.woodLight})`}}/>
+
+      <div style={{minHeight:'100vh',background:C.bg,padding:'28px 24px 60px'}}>
+        <div style={{maxWidth:1060,margin:'0 auto'}}>
+
+          {/* ── Header ── */}
+          <div style={{display:'flex',alignItems:'center',gap:16,marginBottom:28,flexWrap:'wrap'}}>
+            <div style={{width:48,height:48,borderRadius:14,fontSize:24,background:`linear-gradient(135deg,${C.blue},${C.wood})`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,boxShadow:`0 4px 14px ${C.blue}33`}}>🧾</div>
+            <div>
+              <h1 style={{fontSize:22,fontFamily:"'Playfair Display',serif",fontWeight:700,color:C.text,lineHeight:1}}>電子發票轉檔平台</h1>
+              <p style={{color:C.textMuted,fontSize:11,fontFamily:"'Outfit',sans-serif",marginTop:3}}>ERP 銷貨單 Excel → 財政部申報 CSV　·　☁ 雲端儲存</p>
+            </div>
+            <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+              {/* 今日統計 */}
+              <div style={{textAlign:'right',padding:'6px 12px',background:C.bgPanel,border:`1px solid ${C.border}`,borderRadius:10}}>
+                <div style={{fontSize:10,color:C.textMuted,fontFamily:"'Outfit',sans-serif"}}>{todayTW()} 台灣時間</div>
+                <div style={{fontSize:13,fontWeight:700,color:C.blue,fontFamily:"'Outfit',sans-serif"}}>今日 {todayN} 筆 {loadingRecords&&<Spinner/>}</div>
+              </div>
+              {/* 使用者 */}
+              <div style={{background:C.bgPanel,border:`1px solid ${C.border}`,borderRadius:10,padding:'7px 13px'}}>
+                <div style={{fontSize:12,fontWeight:700,color:C.text}}>{session.user?.user_metadata?.name||session.user?.email?.split('@')[0]}</div>
+                <div style={{fontSize:10,color:C.textMuted}}>{session.user?.email}</div>
+              </div>
+              <RoleBadge role={role}/>
+              {role.id==='admin'&&(
+                <button onClick={()=>setShowAdmin(true)} style={{background:C.blueLight,border:`1px solid ${C.blue}44`,color:C.blueDark,borderRadius:10,padding:'9px 14px',cursor:'pointer',fontFamily:"'Outfit',sans-serif",fontWeight:600,fontSize:12,transition:'all .15s'}}
+                  onMouseEnter={e=>e.currentTarget.style.background=C.blueMid}
+                  onMouseLeave={e=>e.currentTarget.style.background=C.blueLight}>🛡 權限管理</button>
+              )}
+              <button onClick={async()=>{
+                localStorage.removeItem('einvoice-role')
+                await supabase.auth.signOut()
+                window.location.replace(window.location.origin)
+              }} style={{background:C.bgPanel,border:`1px solid ${C.border}`,color:C.textSub,borderRadius:10,padding:'9px 14px',cursor:'pointer',fontFamily:"'Outfit',sans-serif",fontWeight:600,fontSize:12,transition:'all .15s'}}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor=C.red;e.currentTarget.style.color=C.red}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.textSub}}>登出</button>
+            </div>
+          </div>
+
+          {showAdmin&&<AdminPanel onClose={()=>setShowAdmin(false)}/>}
+
+          {/* ── Tab bar ── */}
+          <div style={{display:'flex',gap:2,marginBottom:24,background:C.bgPanel,border:`1px solid ${C.border}`,borderRadius:14,padding:5,boxShadow:'0 2px 8px rgba(61,53,48,.05)'}}>
+            {TABS.map((t,i)=>{
+              const active=tab===i,locked=t.locked
+              return(
+                <button key={i} onClick={()=>{if(!locked)setTab(i)}} style={{
+                  flex:1, padding:'11px 10px', borderRadius:10, border:'none',
+                  cursor:locked?'not-allowed':'pointer',
+                  display:'flex', alignItems:'center', justifyContent:'center', gap:7,
+                  transition:'all .2s', opacity:locked?0.35:1,
+                  background:active?C.bgWarm:'transparent',
+                  boxShadow:active?`inset 0 0 0 1px ${C.border}`:'none',
+                }}>
+                  <span style={{fontSize:15}}>{t.icon}</span>
+                  <span style={{fontSize:13,fontWeight:active?700:500,color:active?C.text:locked?C.textMuted:C.textSub,fontFamily:"'Outfit',sans-serif",whiteSpace:'nowrap'}}>{t.label}</span>
+                  {i===0&&records.filter(r=>r.tab_type==='tab1').length>0&&(
+                    <span style={{fontSize:10,color:C.blue,fontFamily:"'Outfit',sans-serif",fontWeight:700,background:C.blueLight,border:`1px solid ${C.blue}33`,borderRadius:20,padding:'1px 7px'}}>{records.filter(r=>r.tab_type==='tab1').length}</span>
+                  )}
+                  {i===2&&records.filter(r=>r.tab_type==='tab3').length>0&&(
+                    <span style={{fontSize:10,color:C.amber,fontFamily:"'Outfit',sans-serif",fontWeight:700,background:C.amberBg,border:`1px solid ${C.amber}33`,borderRadius:20,padding:'1px 7px'}}>{records.filter(r=>r.tab_type==='tab3').length}</span>
+                  )}
+                  {locked&&<span style={{fontSize:11,opacity:.5}}>🔒</span>}
+                  {active&&<div style={{position:'absolute',bottom:0,left:'50%',transform:'translateX(-50%)',width:20,height:2,background:C.wood,borderRadius:2}}/>}
+                </button>
+              )
+            })}
+          </div>
+
+          {/* ── 內容 ── */}
+          {tab===0&&<Tab1 onAddFiles={addTab1} records={records} loadingRecords={loadingRecords}/>}
+          {tab===1&&<Tab2 records={records} onStatusUpdate={handleStatusUpdate} role={role} exportSeq={exportSeq} setExportSeq={setExportSeq}/>}
+          {tab===2&&<Tab3 records={records} onAddFiles={addTab3} role={role}/>}
+        </div>
+      </div>
+    </>
+  )
+}
