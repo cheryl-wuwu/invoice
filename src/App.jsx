@@ -302,7 +302,7 @@ function Tab2({records,onStatusUpdate,role,exportSeq,setExportSeq}){
       const blob=await downloadFileBlob(EXCEL_BUCKET,rec.storage_path)
       const buf=await blob.arrayBuffer()
       const wb=XLSX.read(buf,{type:'array'})
-      const {invoices,errors}=parseERP(wb, tid)
+      const {invoices,errors}=parseERP(wb)
       const hasErr=errors.length>0||invoices.some(i=>!i.valid)
       const status=hasErr?'error':'ok'
       const entry={wb,invoices,errors,status}
