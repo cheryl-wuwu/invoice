@@ -216,7 +216,7 @@ function Tab1({onAddFiles,records,loadingRecords}){
           {uploading?'上傳中，請稍候…':'拖曳 ERP 發票 Excel 至此，或點擊選取'}
         </p>
         <p style={{color:C.textSub,fontSize:12,fontFamily:"'Outfit',sans-serif"}}>
-          　支援 .xlsx / .xls  ☁ 自動同步雲端
+          　支援 .xlsx / .xls　☁ 自動同步雲端
         </p>
         <input ref={ref} type="file" multiple accept=".xlsx,.xls," style={{display:'none'}}
           onChange={e=>{handleFiles([...e.target.files]);e.target.value=''}}/>
@@ -651,7 +651,7 @@ function Tab3({records,onAddFiles,role}){
             style={{border:`2px dashed ${drag?C.amber:C.wood}`,borderRadius:16,padding:'40px 24px',textAlign:'center',cursor:'pointer',background:drag?C.amberBg:C.bgWarm,transition:'all .2s',opacity:uploading?0.7:1}}>
             {uploading?<div style={{fontSize:32,marginBottom:10}}><Spinner/></div>:<div style={{fontSize:40,marginBottom:10}}>📎</div>}
             <p style={{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:16,marginBottom:5,color:C.text}}>{uploading?'上傳中…':'拖曳附件至此，或點擊選取'}</p>
-            <p style={{color:C.textSub,fontSize:12,fontFamily:"'Outfit',sans-serif"}}>支援 PDF　☁ 儲存至雲端</p>
+            <p style={{color:C.textSub,fontSize:12,fontFamily:"'Outfit',sans-serif"}}>支援 .pdf　☁ 儲存至雲端</p>
             <input ref={ref} type="file" multiple accept=".pdf," style={{display:'none'}}
             //<input ref={ref} type="file" multiple style={{display:'none'}} 
               onChange={e=>{handleFiles([...e.target.files]);e.target.value=''}}/>
