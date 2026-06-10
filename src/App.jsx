@@ -754,7 +754,7 @@ export default function App(){
 
   const addTab1=useCallback(async files=>{
     for(const f of files){
-      if(!f.name.match(/\.(xlsx|xls)$/i))continue
+      if(!f.name.match(/\.(xlsx|xls|xlsm)$/i))continue
       const id=`t1-${Date.now()}-${Math.random().toString(36).slice(2)}`
       const path=`${todayKey()}/${id}_${sanitizeFilename(f.name)}`  // storage路徑用安全檔名
       try{
