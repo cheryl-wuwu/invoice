@@ -15,11 +15,11 @@ export const EXCEL_BUCKET = 'Excel bucket'
 export const PDF_BUCKET   = 'PDF bucket'
 ///////////////////////////
 const BUCKET_RESTRICTIONS = {
-  'PDF': {
+  'PDF_BUCKET': {
     allowedTypes: ['application/pdf'],
     errorMsg: '格式錯誤：此欄位僅支援上傳 PDF 檔案。'
   },
-  'Excel': {
+  'EXCEL_BUCKET': {
     // 包含舊版 .xls、新版 .xlsx 以及標準 CSV 格式（可依需求刪減）
     allowedTypes: [
       'application/vnd.ms-excel',                                              // .xls
