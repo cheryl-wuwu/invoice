@@ -13,22 +13,7 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 
 export const EXCEL_BUCKET = 'Excel bucket'
 export const PDF_BUCKET   = 'PDF bucket'
-///////////////////////////
-const BUCKET_RESTRICTIONS = {
-  'PDF_BUCKET': {
-    allowedTypes: ['application/pdf'],
-    errorMsg: '格式錯誤：此欄位僅支援上傳 PDF 檔案。'
-  },
-  'EXCEL_BUCKET': {
-    // 包含舊版 .xls、新版 .xlsx 以及標準 CSV 格式（可依需求刪減）
-    allowedTypes: [
-      'application/vnd.ms-excel',                                              // .xls
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',    // .xlsx
-    ],
-    errorMsg: '格式錯誤：此欄位僅支援上傳 Excel (.xls, .xlsx) 檔案。'
-  }
-};
-//////////////////////////
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 export async function signInWithGoogle() {
@@ -139,16 +124,6 @@ export async function getSeq(dateKey) {
 
 export async function uploadFile(bucket, path, file) {
   console.log('uploading to bucket:', bucket, 'path:', path, 'size:', file.size)
-  const restriction = BUCKET_RESTRICTIONS[bucket]; //取得對應的驗證規則///////
-  if (restriction) {
-    // 檢查檔案 MIME 類型是否符合
-    const isTypeAllowed = restriction.allowedTypes.includes(file.type);
-
-    if (!isTypeAllowed) {
-      console.error('驗證失敗, 原因:', restriction.errorMsg)
-      throw new Error(restriction.errorMsg);
-    }
-  }///////////
   const { data, error } = await supabase.storage.from(bucket).upload(path, file, { upsert: true })
   if (error) {
     console.error('upload error:', error.message, error)
