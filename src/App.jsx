@@ -4,7 +4,7 @@ import {
   supabase, EXCEL_BUCKET, PDF_BUCKET,
   fetchRecords, insertRecord, updateRecordStatus,
   getAndIncrementSeq, getSeq, uploadFile, downloadFileBlob,
-  signOut, getSession, getUserRole
+  signOut, getSession, getUserRole, deleteRecord
 } from './supabase.js'
 import { parseERP, toCSV, downloadCSV, toADDateCSV, getM } from './erp.js'
 import LoginPage from './Auth.jsx'
