@@ -102,13 +102,25 @@ export async function updateRecordStatus(id, status) {
   if (error) throw error
 }
 
-/*export async function deleteRecord(id) {
+// ── 刪除記錄 ────────────────────────────────────────────────────────────────
+
+export async function deleteRecord(id, storagePath, bucket) {
+  // 先刪除 storage 中的檔案
+  if (storagePath && bucket) {
+    const { error: storageError } = await supabase.storage.from(bucket).remove([storagePath])
+    if (storageError) {
+      console.warn('Storage delete warning:', storageError.message)
+      // 不中斷流程，繼續刪除資料庫記錄
+    }
+  }
+  
+  // 再刪除資料庫記錄
   const { error } = await supabase
     .from('upload_records')
     .delete()
     .eq('id', id)
   if (error) throw error
-}*/
+}
 
 // ── 流水號 ────────────────────────────────────────────────────────────────────
 
@@ -146,8 +158,3 @@ export async function downloadFileBlob(bucket, path) {
   if (error) throw error
   return data
 }
-
-/*export async function deleteFileFromBucket(bucket, path) {
-  const { error } = await supabase.storage.from(bucket).remove([path])
-  if (error) throw error
-}*/
