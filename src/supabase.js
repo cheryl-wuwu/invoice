@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 
 const SUPABASE_URL = 'https://tstcskyvyjwbybvvxaxd.supabase.co'
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRzdGNza3l2eWp3YnlidnZ4YXhkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzMzc4NzgsImV4cCI6MjA5NDkxMzg3OH0.kgdDE9iZ6sp6NWD8Rn21n6METZkUXCWt7E03GM-pZ-4'
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRzdGNza3l2eWp3YnlidnZ4YXhkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzMzc4NzgsImV4cCI6MjA5NDkxMzg3OH0.kgdDE9iZ6skgAcZ27MV-pSGLtD-H3kxDl8OmZfI9bwk'
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
@@ -14,7 +14,7 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 export const EXCEL_BUCKET = 'Excel bucket'
 export const PDF_BUCKET   = 'PDF bucket'
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
+// ── Auth ────────────────────────────────────────────────────────────────
 
 export async function signInWithGoogle() {
   const { error } = await supabase.auth.signInWithOAuth({
@@ -37,7 +37,7 @@ export async function getSession() {
   return session
 }
 
-// ── 使用者角色 ─────────────────────────────────────────────────────────────────
+// ── 使用者角色 ────────────────────────────────────────────────────────────
 
 export async function getUserRole(email) {
   if (!email) return 'staff'
@@ -74,7 +74,7 @@ export async function deleteUserRole(email) {
   if (error) throw error
 }
 
-// ── 上傳紀錄 ──────────────────────────────────────────────────────────────────
+// ── 上傳紀錄 ────────────────────────────────────────────────────────────────
 
 export async function fetchRecords() {
   const twoMonthsAgo = new Date()
@@ -102,7 +102,15 @@ export async function updateRecordStatus(id, status) {
   if (error) throw error
 }
 
-// ── 流水號 ────────────────────────────────────────────────────────────────────
+export async function deleteRecord(id) {
+  const { error } = await supabase
+    .from('upload_records')
+    .delete()
+    .eq('id', id)
+  if (error) throw error
+}
+
+// ── 流水號 ──────────────────────────────────────────────────────────────────
 
 export async function getAndIncrementSeq(dateKey) {
   const { data, error } = await supabase.rpc('increment_export_seq', { p_date_key: dateKey })
@@ -120,7 +128,7 @@ export async function getSeq(dateKey) {
   return data?.[0]?.seq || 0
 }
 
-// ── Storage ───────────────────────────────────────────────────────────────────
+// ── Storage ─────────────────────────────────────────────────────────────────
 
 export async function uploadFile(bucket, path, file) {
   console.log('uploading to bucket:', bucket, 'path:', path, 'size:', file.size)
@@ -137,4 +145,9 @@ export async function downloadFileBlob(bucket, path) {
   const { data, error } = await supabase.storage.from(bucket).download(path)
   if (error) throw error
   return data
+}
+
+export async function deleteFileFromBucket(bucket, path) {
+  const { error } = await supabase.storage.from(bucket).remove([path])
+  if (error) throw error
 }
