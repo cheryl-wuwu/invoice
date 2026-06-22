@@ -697,7 +697,7 @@ function Tab3({records,onAddFiles,role}){
             </div>
             {t3.map((rec,idx)=>(
               const isOwner = rec.uploader === currentUserName
-              return( ///////////////////////////
+              return(
                 <div key={rec.id} style={{display:'grid',gridTemplateColumns:'28px 1fr 80px 140px 140px',padding:'13px 18px',alignItems:'center',gap:8,borderBottom:idx<t3.length-1?`1px solid ${C.borderLight}`:'none'}}
                   onMouseEnter={e=>e.currentTarget.style.background=C.bgHover}
                   onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
@@ -725,7 +725,7 @@ function Tab3({records,onAddFiles,role}){
                     )}
                   </div>
                 </div>
-              ) //////////////////////
+              )
             ))}
           </Card>
         )}
