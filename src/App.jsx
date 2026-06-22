@@ -170,7 +170,7 @@ function RoleBadge({role}){
 // ═══════════════════════════════════════════════════════════════════════════════
 // Tab 1：上傳 & 紀錄
 // ═══════════════════════════════════════════════════════════════════════════════
-function Tab1({onAddFiles,records,loadingRecords}){
+function Tab1({onAddFiles,records,loadingRecords,onDeleteFile,currentUserName}){
   const [drag,setDrag]=useState(false)
   const [filter,setFilter]=useState('invoice') // 預設只顯示當天發票
   const [sortBy,setSortBy]=useState('time_desc') // time_desc / time_asc / name_asc / size_desc
