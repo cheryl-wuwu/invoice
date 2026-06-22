@@ -102,6 +102,14 @@ export async function updateRecordStatus(id, status) {
   if (error) throw error
 }
 
+/*export async function deleteRecord(id) {
+  const { error } = await supabase
+    .from('upload_records')
+    .delete()
+    .eq('id', id)
+  if (error) throw error
+}*/
+
 // ── 流水號 ────────────────────────────────────────────────────────────────────
 
 export async function getAndIncrementSeq(dateKey) {
@@ -138,3 +146,8 @@ export async function downloadFileBlob(bucket, path) {
   if (error) throw error
   return data
 }
+
+/*export async function deleteFileFromBucket(bucket, path) {
+  const { error } = await supabase.storage.from(bucket).remove([path])
+  if (error) throw error
+}*/
