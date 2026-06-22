@@ -621,7 +621,7 @@ function PDFModal({rec, blobUrl, onClose}){
   )
 }
 
-function Tab3({records,onAddFiles,role}){
+function Tab3({records,onAddFiles,role,onDeleteFile,currentUserName}){
   const [drag,setDrag]         = useState(false)
   const [uploading,setUpl]     = useState(false)
   const [previewLoading,setPL] = useState(null)
