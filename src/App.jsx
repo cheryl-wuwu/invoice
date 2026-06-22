@@ -266,6 +266,8 @@ function Tab1({onAddFiles,records,loadingRecords}){
           </div>
           {filtered.map((r,idx)=>{
             const ts=new Date(r.uploaded_at).getTime()
+            const isOwner = r.uploader === currentUserName //////////////////
+            const canDelete = isOwner && r.status === 'pending' //////////////////////////
             return(
               <div key={r.id} style={{display:'grid',gridTemplateColumns:'28px 1fr 80px 80px 140px 80px',padding:'13px 18px',alignItems:'center',gap:8,borderBottom:idx<filtered.length-1?`1px solid ${C.borderLight}`:'none',transition:'background .12s'}}
                 onMouseEnter={e=>e.currentTarget.style.background=C.bgHover}
@@ -278,7 +280,18 @@ function Tab1({onAddFiles,records,loadingRecords}){
                 <span style={{fontSize:11,color:C.textSub,fontFamily:"'Outfit',monospace"}}>{fmtBytes(r.size)}</span>
                 <span style={{fontSize:11,color:C.textSub,fontFamily:"'Outfit',sans-serif"}}>{r.tab_type==='tab3'?'附件':'發票'}</span>
                 <span style={{fontSize:11,color:C.textSub,fontFamily:"'Outfit',monospace"}}>{fmtTime(ts)}</span>
-                <Badge status={r.tab_type==='tab3'?'attach':r.status}/>
+                <div style={{display:'flex',justifyContent:'center'}}> ////////////////////
+                  {canDelete && (
+                    <Btn 
+                      onClick={() => onDeleteFile(r)} 
+                      variant="danger" 
+                      style={{padding:'5px 10px',fontSize:11}}
+                    >
+                      🗑 刪除
+                    </Btn>
+                  )}
+                  {!canDelete && <Badge status={r.tab_type==='tab3'?'attach':r.status}/>}
+                </div> ///////////////////////
               </div>
             )
           })}
@@ -571,6 +584,7 @@ function Tab2({records,onStatusUpdate,role,exportSeq,setExportSeq}){
     </div>
   )
 }
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Tab 3：附件管理
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -682,17 +696,36 @@ function Tab3({records,onAddFiles,role}){
               {['','檔案名稱','大小','上傳時間','操作'].map((h,i)=><span key={i} style={{textAlign:i===4?'center':'left'}}>{h}</span>)}
             </div>
             {t3.map((rec,idx)=>(
-              <div key={rec.id} style={{display:'grid',gridTemplateColumns:'28px 1fr 80px 140px 90px',padding:'13px 18px',alignItems:'center',gap:8,borderBottom:idx<t3.length-1?`1px solid ${C.borderLight}`:'none',transition:'background .12s'}}
-                onMouseEnter={e=>e.currentTarget.style.background=C.bgHover}
-                onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                <span style={{fontSize:17,textAlign:'center'}}>{fileIcon(rec.name)}</span>
-                <span style={{fontSize:13,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:C.text}} title={rec.name}>{rec.name}</span>
-                <span style={{fontSize:11,color:C.textSub,fontFamily:"'Outfit',monospace"}}>{fmtBytes(rec.size)}</span>
-                <span style={{fontSize:11,color:C.textSub,fontFamily:"'Outfit',monospace"}}>{fmtTime(new Date(rec.uploaded_at).getTime())}</span>
-                <div style={{display:'flex',justifyContent:'center'}}>
-                  {previewLoading===rec.id?<Spinner/>:<Btn onClick={()=>openPreview(rec)} variant="primary">👁 預覽</Btn>}
+              const isOwner = rec.uploader === currentUserName
+              return( ///////////////////////////
+                <div key={rec.id} style={{display:'grid',gridTemplateColumns:'28px 1fr 80px 140px 140px',padding:'13px 18px',alignItems:'center',gap:8,borderBottom:idx<t3.length-1?`1px solid ${C.borderLight}`:'none'}}
+                  onMouseEnter={e=>e.currentTarget.style.background=C.bgHover}
+                  onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                  <span style={{fontSize:17,textAlign:'center'}}>{fileIcon(rec.name)}</span>
+                  <div style={{minWidth:0}}>
+                    <span style={{fontSize:13,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:C.text,display:'block'}} title={rec.name}>{rec.name}</span>
+                    {rec.uploader&&<div style={{fontSize:10,color:C.textMuted,fontFamily:"'Outfit',sans-serif",marginTop:2}}>{rec.uploader}</div>}
+                  </div>
+                  <span style={{fontSize:11,color:C.textSub,fontFamily:"'Outfit',monospace"}}>{fmtBytes(rec.size)}</span>
+                  <span style={{fontSize:11,color:C.textSub,fontFamily:"'Outfit',monospace"}}>{fmtTime(new Date(rec.uploaded_at).getTime())}</span>
+                  <div style={{display:'flex',justifyContent:'center',gap:4,flexWrap:'wrap'}}>
+                    {previewLoading===rec.id?<Spinner/>:(
+                      <>
+                        {isOwner && (
+                          <Btn 
+                            onClick={() => onDeleteFile(rec)}
+                            variant="danger" 
+                            style={{padding:'5px 10px',fontSize:11}}
+                          >
+                            🗑 刪除
+                          </Btn>
+                        )}
+                        <Btn onClick={()=>openPreview(rec)} variant="primary" style={{padding:'5px 10px',fontSize:11}}>👁 預覽</Btn>
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
+              ) //////////////////////
             ))}
           </Card>
         )}
@@ -713,6 +746,7 @@ export default function App(){
   const [loadingRecords,setLoading] = useState(true)
   const [exportSeq,setExportSeq]    = useState(0)
   const [showAdmin,setShowAdmin]    = useState(false)
+  const [deleting,setDeleting]      = useState(false) ////////////////////
 
   useEffect(()=>{
     const ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRzdGNza3l2eWp3YnlidnZ4YXhkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzMzc4NzgsImV4cCI6MjA5NDkxMzg3OH0.kgdDE9iZ6sp6NWD8Rn21n6METZkUXCWt7E03GM-pZ-4'
@@ -754,6 +788,8 @@ export default function App(){
     return()=>clearInterval(t)
   },[session])
 
+  const currentUserName = session?.user?.user_metadata?.name || session?.user?.email?.split('@')[0] || '' ////////////
+
   const addTab1=useCallback(async files=>{
     for(const f of files){
       if(!f.name.match(/\.(xlsx|xls|xlsm)$/i))continue
@@ -761,11 +797,11 @@ export default function App(){
       const path=`${todayKey()}/${id}_${sanitizeFilename(f.name)}`  // storage路徑用安全檔名
       try{
         await uploadFile(EXCEL_BUCKET,path,f)
-        const rec={id,name:f.name,size:f.size,uploaded_at:new Date().toISOString(),tab_type:'tab1',status:'pending',storage_path:path,uploader:session?.user?.user_metadata?.name||session?.user?.email?.split('@')[0]||role.label}
+        const rec={id,name:f.name,size:f.size,uploaded_at:new Date().toISOString(),tab_type:'tab1',status:'pending',storage_path:path,uploader:currentUserName}
         await insertRecord(rec);setRecords(p=>[rec,...p])
       }catch(e){alert('上傳失敗：'+e.message)}
     }
-  },[role,session])
+  },[role,session,currentUserName])
 
   const addTab3=useCallback(async files=>{
     for(const f of files){
@@ -775,16 +811,29 @@ export default function App(){
       const path=`${todayKey()}/${id}_${sanitizeFilename(f.name)}`  // storage路徑用安全檔名
       try{
         await uploadFile(PDF_BUCKET,path,f)
-        const rec={id,name:f.name,size:f.size,uploaded_at:new Date().toISOString(),tab_type:'tab3',status:'attach',storage_path:path,uploader:session?.user?.user_metadata?.name||session?.user?.email?.split('@')[0]||role.label}
+        const rec={id,name:f.name,size:f.size,uploaded_at:new Date().toISOString(),tab_type:'tab3',status:'attach',storage_path:path,uploader:currentUserName}
         await insertRecord(rec);setRecords(p=>[rec,...p])
       }catch(e){alert('上傳失敗：'+e.message)}
     }
-  },[role,session])
+  },[role,session,currentUserName])
 
   const handleStatusUpdate=useCallback((id,status)=>{
     setRecords(p=>p.map(r=>r.id===id?{...r,status}:r))
   },[])
 
+  const handleDeleteFile = useCallback(async (rec) => {
+    if (!confirm(`確定要刪除「${rec.name}」？此操作無法復原。`)) return
+    setDeleting(true)
+    try {
+      const bucket = rec.tab_type === 'tab1' ? EXCEL_BUCKET : PDF_BUCKET
+      await deleteRecord(rec.id, rec.storage_path, bucket)
+      setRecords(p => p.filter(r => r.id !== rec.id))
+    } catch (e) {
+      alert('刪除失敗：' + e.message)
+    }
+    setDeleting(false)
+  }, [])
+  
   useEffect(()=>{
     const t=setTimeout(()=>setSession(s=>s===undefined?null:s),5000)
     return()=>clearTimeout(t)
@@ -876,10 +925,14 @@ export default function App(){
                   <span style={{fontSize:15}}>{t.icon}</span>
                   <span style={{fontSize:13,fontWeight:active?700:500,color:active?C.text:locked?C.textMuted:C.textSub,fontFamily:"'Outfit',sans-serif",whiteSpace:'nowrap'}}>{t.label}</span>
                   {i===0&&records.filter(r=>r.tab_type==='tab1').length>0&&(
-                    <span style={{fontSize:10,color:C.blue,fontFamily:"'Outfit',sans-serif",fontWeight:700,background:C.blueLight,border:`1px solid ${C.blue}33`,borderRadius:20,padding:'1px 7px'}}>{records.filter(r=>r.tab_type==='tab1').length}</span>
+                    <span style={{fontSize:10,color:C.blue,fontFamily:"'Outfit',sans-serif",fontWeight:700,background:C.blueLight,border:`1px solid ${C.blue}33`,borderRadius:20,padding:'1px 7px'}}>
+                      {records.filter(r=>r.tab_type==='tab1').length}
+                    </span>
                   )}
                   {i===2&&records.filter(r=>r.tab_type==='tab3').length>0&&(
-                    <span style={{fontSize:10,color:C.amber,fontFamily:"'Outfit',sans-serif",fontWeight:700,background:C.amberBg,border:`1px solid ${C.amber}33`,borderRadius:20,padding:'1px 7px'}}>{records.filter(r=>r.tab_type==='tab3').length}</span>
+                    <span style={{fontSize:10,color:C.amber,fontFamily:"'Outfit',sans-serif",fontWeight:700,background:C.amberBg,border:`1px solid ${C.amber}33`,borderRadius:20,padding:'1px 7px'}}>
+                      {records.filter(r=>r.tab_type==='tab3').length}
+                    </span>
                   )}
                   {locked&&<span style={{fontSize:11,opacity:.5}}>🔒</span>}
                 </button>
@@ -888,9 +941,9 @@ export default function App(){
           </div>
 
           {/* ── 內容 ── */}
-          {tab===0&&<Tab1 onAddFiles={addTab1} records={records} loadingRecords={loadingRecords}/>}
+          {tab===0&&<Tab1 onAddFiles={addTab1} records={records} loadingRecords={loadingRecords} onDeleteFile={handleDeleteFile} currentUserName={currentUserName}/>}
           {tab===1&&<Tab2 records={records} onStatusUpdate={handleStatusUpdate} role={role} exportSeq={exportSeq} setExportSeq={setExportSeq}/>}
-          {tab===2&&<Tab3 records={records} onAddFiles={addTab3} role={role}/>}
+          {tab===2&&<Tab3 records={records} onAddFiles={addTab3} role={role} onDeleteFile={handleDeleteFile} currentUserName={currentUserName}/>}
         </div>
       </div>
     </>
